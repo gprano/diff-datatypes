@@ -1,0 +1,41 @@
+Name:         diff-datatypes
+Version:      0.1
+Synopsis:     Diff and patch based mergeable datatypes
+Authors:      KC Sivaramakrishnan, Guillain Potron
+License:      ISC
+BuildTools:   ocamlbuild
+OASISFormat:  0.4
+Plugins:      META (0.4), DevFiles (0.4)
+
+Flag examples
+  Description: build the examples
+  Default: false
+
+Library "diff-datatypes"
+  Path:             lib/
+  Findlibname:      diff_datatypes
+  InternalModules:  Heap, Datatypes
+  Modules:          Diff_datatypes
+  ByteOpt:          -thread
+  NativeOpt:        -thread
+
+Executable "queue_test"
+  Path:             examples/
+  MainIs:           queue_test.ml
+  Build$:           flag(examples)
+  CompiledObject:   best
+  Install:          false
+  BuildDepends:     diff_datatypes
+  ByteOpt:          -thread
+  NativeOpt:        -thread
+
+
+Executable "tree_test"
+  Path:             examples/
+  MainIs:           tree_test.ml
+  Build$:           flag(examples)
+  CompiledObject:   best
+  Install:          false
+  BuildDepends:     diff_datatypes
+  ByteOpt:          -thread
+  NativeOpt:        -thread

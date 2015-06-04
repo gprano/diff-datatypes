@@ -1,0 +1,5 @@
+S lib
+S examples
+
+B _build/lib
+B _build/examples
