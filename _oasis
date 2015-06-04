@@ -48,3 +48,13 @@ Executable "tree_test"
   BuildDepends:     diff_datatypes
   ByteOpt:          -thread
   NativeOpt:        -thread
+
+Executable "empty_test"
+  Path:             examples/
+  MainIs:           empty_test.ml
+  Build$:           flag(examples)
+  CompiledObject:   best
+  Install:          false
+  BuildDepends:     diff_datatypes
+  ByteOpt:          -thread
+  NativeOpt:        -thread
