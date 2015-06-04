@@ -17,5 +17,5 @@ val dfs : Obj.t -> 'b action -> 'b -> 'b
   
 val show_obj : 'a -> unit
   
-
+val merge : edit_script -> edit_script -> edit_script
     

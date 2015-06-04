@@ -29,6 +29,15 @@ Executable "queue_test"
   ByteOpt:          -thread
   NativeOpt:        -thread
 
+Executable "stack_test"
+  Path:             examples/
+  MainIs:           stack_test.ml
+  Build$:           flag(examples)
+  CompiledObject:   best
+  Install:          false
+  BuildDepends:     diff_datatypes
+  ByteOpt:          -thread
+  NativeOpt:        -thread
 
 Executable "tree_test"
   Path:             examples/

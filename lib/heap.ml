@@ -188,3 +188,22 @@ let show_obj q =
   dfs (Obj.repr q) acts ();
   printf "\n"
 
+let rec (merge : edit_script -> edit_script -> edit_script)
+  = fun a b -> match a,b with
+    | [],[] -> []
+    | Ins ex :: xs, Ins ey :: ys ->
+      if ex = ey then Ins ex :: merge xs ys
+      else Ins ex :: Ins ey :: merge xs ys
+    | Ins e :: xs, ys
+    | xs, Ins e :: ys -> Ins e :: merge xs ys
+    | Del ex :: xs, Del ey :: ys ->
+      if ex = ey then Del ex :: merge xs ys
+      else failwith "merging Del x, Del y with x<>y, should not happen ?"
+    | Del e :: xs, Cpy e_ :: ys
+    | Cpy e_ :: xs, Del e :: ys -> assert (e = e_); Del e :: merge xs ys
+    | Cpy ex :: xs, Cpy ey :: ys ->
+      if ex = ey then Cpy ex :: merge xs ys
+      else failwith "merging Cpy x, Cpy y with x<>y, should not happen ?"
+    | ex::xs,[] | [],ex::xs ->
+      failwith "Del x,[] or Cpy x,[]: should not happen ?"
+
