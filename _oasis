@@ -14,10 +14,12 @@ Flag examples
 Library "diff-datatypes"
   Path:             lib/
   Findlibname:      diff_datatypes
-  InternalModules:  Heap, Datatypes
+  InternalModules:  Heap, Datatypes, Irmin_heap
   Modules:          Diff_datatypes
   ByteOpt:          -thread
   NativeOpt:        -thread
+  BuildDepends:	    irmin, comparelib.syntax
+  XMETARequires:    irmin, comparelib
 
 Executable "queue_test"
   Path:             examples/

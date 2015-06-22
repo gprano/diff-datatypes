@@ -6,6 +6,7 @@ module type IQUEUE =
     val empty : 'a t
     val push : 'a t -> 'a -> 'a t
     val pop : 'a t -> 'a option * 'a t
+    val show : ('a -> string) -> 'a t -> string
   end
 
 module IStack : IQUEUE
