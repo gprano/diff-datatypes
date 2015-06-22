@@ -124,8 +124,88 @@ module Make
     Store.add (store "add node") (C.Node node) >>= fun key_node ->
     return key_node
 
+  type edit =
+    | Ins of index
+    | Cpy of index
+    | Del of index
 
-  let (merge : Path.t -> t option Irmin.Merge.t) = raise (Error `Todo)
+  type edit_script = edit list
 
+  module ObjSet = Set.Make (K)
+
+  type dfs_ctxt =
+    {visited : ObjSet.t; todo : t list}
+
+  let rec dfs_1step store {visited; todo} =
+    match todo with
+    | [] -> return {visited; todo}
+    | obj::xs ->
+      if ObjSet.mem obj visited then dfs_1step store {visited; todo = xs}
+      else
+        begin
+          Store.read (store "read dfs_1step") obj >>= function
+          | None -> failwith "K.t pointer to nothing"
+          | Some (C.Node node) ->
+            return {visited = ObjSet.add obj visited; todo = node.C.children@xs}
+          | Some (C.Elt _) -> return {visited; todo}
+        end
+
+  let diff (s1 : t) (s2 : t) : edit_script Lwt.t =
+    Store.create() >>= fun store ->
+    
+    let rec diff_ctxt c1 c2 =
+      match (c1.todo, c2.todo) with
+      | [], [] -> return []
+      | [], y::_ ->
+        dfs_1step store c2 >>= fun c2 ->
+        diff_ctxt c1 c2 >>= fun es ->
+        return (Ins y :: es)
+      | x::_, [] ->
+        dfs_1step store c1 >>= fun c1 ->
+        diff_ctxt c1 c2 >>= fun es ->
+        return (Ins x :: es)
+      | x::_, y::_ ->
+        dfs_1step store c1 >>= fun c1_ ->
+        dfs_1step store c2 >>= fun c2_ ->
+        let best2 () =
+          diff_ctxt c1_ c2 >>= fun es1 ->
+          diff_ctxt c1 c2_ >>= fun es2 ->
+          let l1 = Del x :: es1 in
+          let l2 = Ins y :: es2 in
+          if List.length l1 < List.length l2 then return l1 else return l2 in
+        let best3 () =
+          diff_ctxt c1_ c2_ >>= fun es ->
+          let l1 = Cpy x :: es in
+          best2 () >>= fun l2 ->
+          if List.length l1 < List.length l2 then return l1 else return l2 in
+        if equal x y then best3 () else best2 () in
+
+    let c1 = {visited = ObjSet.empty; todo = [s1]} in
+    let c2 = {visited = ObjSet.empty; todo = [s2]} in
+    diff_ctxt c1 c2
+
+  let rec patch_core c stk = function
+    | [] -> return ()
+    | _ -> failwith "todo"
+  (* There is a problem when patching trees rather than lists; 
+     if we have subtrees insertions on both sides it's not clear to merge in a valid way *)
+  
+  let patch : t -> edit_script -> t = raise (Error `Todo)
+
+  let merge_script : edit_script -> edit_script -> edit_script =
+    raise (Error `Todo)
+
+  let merge : Path.t -> t option Irmin.Merge.t =
+    
+    let merge ~old s1 s2 =
+      old () >>= function
+      | `Conflict _ | `Ok None -> conflict "merge"
+      | `Ok (Some old) ->
+        diff old s1 >>= fun e1 ->
+        diff old s2 >>= fun e2 ->
+        let e = merge_script e1 e2 in
+        ok (patch old e) in
+
+    fun _path -> Irmin.Merge.option (module K) merge
   
 end
