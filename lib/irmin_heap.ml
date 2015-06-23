@@ -184,13 +184,37 @@ module Make
     let c2 = {visited = ObjSet.empty; todo = [s2]} in
     diff_ctxt c1 c2
 
-  let rec patch_core c stk = function
-    | [] -> return ()
-    | _ -> failwith "todo"
-  (* There is a problem when patching trees rather than lists; 
-     if we have subtrees insertions on both sides it's not clear to merge in a valid way *)
+  let rec patch_core store (c : dfs_ctxt) =
+    let add_node_of_key x es c =
+      Store.read (store "patch_core read") x >>= function
+      | None -> failwith "read None"
+      | Some (C.Elt _ ) -> failwith "Ins C.Elt"
+      | Some (C.Node node) ->
+        begin
+          let rec f c e acc = function
+            | [] -> return (c,e,acc)
+            | x :: xs ->
+              patch_core store c e >>= fun (c,e,k) ->
+              f c e (k::acc) xs in
+          f c es [] node.C.children >>= fun (c,e,acc) ->
+          let newnode = { C.elt = node.C.elt;
+                          C.children = acc; } in
+          Store.add (store "patch_core add") (C.Node newnode) >>= fun k ->
+          return (c,e,k)
+        end in
+    function
+    | [] -> failwith "empty edit script in patch_core, which K.t to return ?"
+    | Ins x::es -> add_node_of_key x es c
+    | Del _::es -> dfs_1step store c >>= fun c -> patch_core store c es
+    | Cpy _::es -> ( match c.todo with
+      | [] -> failwith "patch_core : edit script not compatible"
+      | x::_ -> dfs_1step store c >>= fun c -> add_node_of_key x es c )
   
-  let patch : t -> edit_script -> t = raise (Error `Todo)
+  let (patch : t -> edit_script -> t Lwt.t) = fun k es ->
+    Store.create () >>= fun store ->
+    patch_core store {visited = ObjSet.empty; todo = [k]} es >>= fun (c,e,k) ->
+    assert (c.todo = [] && e = []);
+    return k
 
   let merge_script : edit_script -> edit_script -> edit_script =
     raise (Error `Todo)
@@ -204,7 +228,8 @@ module Make
         diff old s1 >>= fun e1 ->
         diff old s2 >>= fun e2 ->
         let e = merge_script e1 e2 in
-        ok (patch old e) in
+        patch old e >>= fun s_merge ->
+        ok s_merge in
 
     fun _path -> Irmin.Merge.option (module K) merge
   
