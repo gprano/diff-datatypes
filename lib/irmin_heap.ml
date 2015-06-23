@@ -216,8 +216,26 @@ module Make
     assert (c.todo = [] && e = []);
     return k
 
-  let merge_script : edit_script -> edit_script -> edit_script =
-    raise (Error `Todo)
+
+  (* TODO fix equality used for sharing*)
+  let rec merge_script : edit_script -> edit_script -> edit_script =
+      fun a b -> match a,b with
+    | [],[] -> []
+    | Ins ex :: xs, Ins ey :: ys ->
+      if ex = ey then Ins ex :: merge_script xs ys
+      else Ins ex :: Ins ey :: merge_script xs ys
+    | Ins e :: xs, ys
+    | xs, Ins e :: ys -> Ins e :: merge_script xs ys
+    | Del ex :: xs, Del ey :: ys ->
+      if ex = ey then Del ex :: merge_script xs ys
+      else failwith "merging Del x, Del y with x<>y, should not happen ?"
+    | Del e :: xs, Cpy e_ :: ys
+    | Cpy e_ :: xs, Del e :: ys -> assert (e = e_); Del e :: merge_script xs ys
+    | Cpy ex :: xs, Cpy ey :: ys ->
+      if ex = ey then Cpy ex :: merge_script xs ys
+      else failwith "merging Cpy x, Cpy y with x<>y, should not happen ?"
+    | ex::xs,[] | [],ex::xs ->
+      failwith "Del x,[] or Cpy x,[]: should not happen ?"
 
   let merge : Path.t -> t option Irmin.Merge.t =
     
