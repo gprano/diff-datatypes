@@ -8,8 +8,10 @@ type error = [ `Todo ]
 exception Error of error
 
 module type S = sig
-  include Irmin.Contents.S
   type elt
+  type key
+  type node = { value: key option; children : key list }
+  include Irmin.Contents.S
   val create : unit -> t Lwt.t
   val add : t -> elt -> t list -> t Lwt.t
 end
@@ -27,14 +29,15 @@ module Make
     (Config: Config)
 = struct
 
+  type elt = V.t
+  type key = K.t
+  include K
+
+  type node = { value : key option; children : key list}
+
   module Path = P
 
   module C = struct (* what will be inside the AO store *)
-
-    type node = {
-      elt : K.t option;
-      children : K.t list;
-    }
 
     module KO = Tc.Option (K)
     module KL = Tc.List (K)
@@ -42,10 +45,10 @@ module Make
         (Tc.Pair(KO)(KL))
         (struct
           type t = node
-          let to_t (elt,children) =
-            {elt; children}
-          let of_t {elt; children} =
-            (elt, children)
+          let to_t (value,children) =
+            {value; children}
+          let of_t {value; children} =
+            (value, children)
         end)
     
     type t =
@@ -98,15 +101,10 @@ module Make
       create Config.conf Config.task
 
   end
-
-  type index = K.t (* must always point to a C.Node and not C.Elt ? *)
-  include K
   
-  type elt = V.t
-
   let empty = {
-    C.elt = None;
-    C.children = [];
+    value = None;
+    children = [];
   }
 
   let create () =
@@ -118,16 +116,16 @@ module Make
     Store.create () >>= fun store ->
     Store.add (store "add elt") (C.Elt elt) >>= fun key_elt ->
     let node = {
-      C.elt = Some key_elt;
-      C.children = children;
+      value = Some key_elt;
+      children = children;
     } in
     Store.add (store "add node") (C.Node node) >>= fun key_node ->
     return key_node
 
   type edit =
-    | Ins of index
-    | Cpy of index
-    | Del of index
+    | Ins of key
+    | Cpy of key
+    | Del of key
 
   type edit_script = edit list
 
@@ -146,7 +144,7 @@ module Make
           Store.read (store "read dfs_1step") obj >>= function
           | None -> failwith "K.t pointer to nothing"
           | Some (C.Node node) ->
-            return {visited = ObjSet.add obj visited; todo = node.C.children@xs}
+            return {visited = ObjSet.add obj visited; todo = node.children@xs}
           | Some (C.Elt _) -> return {visited; todo}
         end
 
@@ -196,9 +194,9 @@ module Make
             | x :: xs ->
               patch_core store c e >>= fun (c,e,k) ->
               f c e (k::acc) xs in
-          f c es [] node.C.children >>= fun (c,e,acc) ->
-          let newnode = { C.elt = node.C.elt;
-                          C.children = acc; } in
+          f c es [] node.children >>= fun (c,e,acc) ->
+          let newnode = { value = node.value ;
+                          children = acc; } in
           Store.add (store "patch_core add") (C.Node newnode) >>= fun k ->
           return (c,e,k)
         end in

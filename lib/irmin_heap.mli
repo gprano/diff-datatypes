@@ -8,9 +8,12 @@ exception Error of error
 
 module type S = sig
 
-  include Irmin.Contents.S
-
   type elt
+  type key
+  
+  type node = { value: key option; children : key list }
+
+  include Irmin.Contents.S
   
   val create : unit -> t Lwt.t
   
@@ -30,5 +33,6 @@ module Make
     (P: Irmin.Path.S)
     (C: Config)
   : S with type elt = V.t
+       and type key = K.t
        and module Path = P
 
