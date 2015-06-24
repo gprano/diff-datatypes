@@ -3,17 +3,16 @@ open Irmin.Merge.OP
 
 exception Empty
 
-type error = [ `Todo ]
+type error = [ `Todo | `Read_none ]
              
 exception Error of error
 
 module type S = sig
-  type elt
-  type key
-  type node = { value: key option; children : key list }
   include Irmin.Contents.S
+  type elt
   val create : unit -> t Lwt.t
   val add : t -> elt -> t list -> t Lwt.t
+  val read_exn : t -> (elt option * t list) Lwt.t
 end
 
 module type Config = sig
@@ -30,10 +29,9 @@ module Make
 = struct
 
   type elt = V.t
-  type key = K.t
   include K
 
-  type node = { value : key option; children : key list}
+  type node = { value : t option; children : t list}
 
   module Path = P
 
@@ -122,10 +120,23 @@ module Make
     Store.add (store "add node") (C.Node node) >>= fun key_node ->
     return key_node
 
+  let (read_exn : t -> ((elt option)*(t list)) Lwt.t) = fun s ->
+    Store.create () >>= fun store ->
+    Store.read (store "read") s >>= function
+    | None -> raise (Error `Read_none)
+    | Some (C.Elt _) -> failwith "try to read Elt from API"
+    | Some (C.Node x) -> ( match x.value with
+      | None -> return (None, x.children)
+      | Some k ->
+        ( Store.read (store "read elt") k >>= function
+            | None -> raise (Error `Read_none)
+            | Some (C.Node _) -> failwith "read elt key and get a node"
+            | Some (C.Elt elt) -> return (Some elt, x.children) ))
+  
   type edit =
-    | Ins of key
-    | Cpy of key
-    | Del of key
+    | Ins of t
+    | Cpy of t
+    | Del of t
 
   type edit_script = edit list
 

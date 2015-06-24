@@ -2,22 +2,21 @@
 
 exception Empty
 
-type error = [ `Todo ]
+type error = [ `Todo | `Read_none ]
 
 exception Error of error
 
 module type S = sig
 
-  type elt
-  type key
-  
-  type node = { value: key option; children : key list }
-
   include Irmin.Contents.S
+  
+  type elt
   
   val create : unit -> t Lwt.t
   
-  val add : t -> elt -> t list -> t Lwt.t  
+  val add : t -> elt -> t list -> t Lwt.t
+
+  val read_exn : t -> (elt option * t list) Lwt.t
 
 end
 
@@ -33,6 +32,6 @@ module Make
     (P: Irmin.Path.S)
     (C: Config)
   : S with type elt = V.t
-       and type key = K.t
+       and type t = K.t
        and module Path = P
 

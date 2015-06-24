@@ -14,7 +14,7 @@ Flag examples
 Library "diff-datatypes"
   Path:             lib/
   Findlibname:      diff_datatypes
-  InternalModules:  Heap, Datatypes, Irmin_heap
+  InternalModules:  Heap, Datatypes, Irmin_heap, Irmin_datatypes
   Modules:          Diff_datatypes
   ByteOpt:          -thread
   NativeOpt:        -thread
