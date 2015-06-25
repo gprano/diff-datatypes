@@ -1,6 +1,5 @@
 open Lwt
 
-
 module type MSTACK = sig
   type t
   type elt
@@ -8,13 +7,14 @@ module type MSTACK = sig
   val push : t -> elt -> t Lwt.t
   val pop : t -> (elt option * t) Lwt.t
   val show : (elt -> string) -> t -> string Lwt.t
+  module Path : Irmin.Path.S
+  val merge : Path.t -> t option Irmin.Merge.t
 end
 
 module MSTACK_Make (S: Irmin_heap.S)
 = struct
   
-  type t = S.t
-  type elt = S.elt
+  include S
 
   let empty = S.create ()
 
@@ -31,7 +31,7 @@ module MSTACK_Make (S: Irmin_heap.S)
     | Some e, [x] ->
       ( show to_string x >>= fun str ->
         return ((to_string e)^"::"^str) )
-    | None, [] -> return ""
+    | None, [] -> return "[]"
     | _ -> failwith "incorrect stack shape"
 
 end

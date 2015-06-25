@@ -232,7 +232,7 @@ module Make
     | [],[] -> []
     | Ins ex :: xs, Ins ey :: ys ->
       if ex = ey then Ins ex :: merge_script xs ys
-      else Ins ex :: Ins ey :: merge_script xs ys
+      else Ins ex :: merge_script xs b
     | Ins e :: xs, ys
     | xs, Ins e :: ys -> Ins e :: merge_script xs ys
     | Del ex :: xs, Del ey :: ys ->

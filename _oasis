@@ -27,7 +27,7 @@ Executable "queue_test"
   Build$:           flag(examples)
   CompiledObject:   best
   Install:          false
-  BuildDepends:     diff_datatypes
+  BuildDepends:     diff_datatypes, irmin.unix
   ByteOpt:          -thread
   NativeOpt:        -thread
 
@@ -37,7 +37,7 @@ Executable "stack_test"
   Build$:           flag(examples)
   CompiledObject:   best
   Install:          false
-  BuildDepends:     diff_datatypes
+  BuildDepends:     diff_datatypes, irmin.unix
   ByteOpt:          -thread
   NativeOpt:        -thread
 
@@ -47,7 +47,7 @@ Executable "tree_test"
   Build$:           flag(examples)
   CompiledObject:   best
   Install:          false
-  BuildDepends:     diff_datatypes
+  BuildDepends:     diff_datatypes, irmin.unix
   ByteOpt:          -thread
   NativeOpt:        -thread
 
@@ -57,6 +57,16 @@ Executable "empty_test"
   Build$:           flag(examples)
   CompiledObject:   best
   Install:          false
-  BuildDepends:     diff_datatypes
+  BuildDepends:     diff_datatypes, irmin.unix
+  ByteOpt:          -thread
+  NativeOpt:        -thread
+
+Executable "ir_testing"
+  Path:             examples/
+  MainIs:           ir_testing.ml
+  Build$:           flag(examples)
+  CompiledObject:   best
+  Install:          false
+  BuildDepends:     diff_datatypes, irmin.unix
   ByteOpt:          -thread
   NativeOpt:        -thread
