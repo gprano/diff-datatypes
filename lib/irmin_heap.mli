@@ -14,10 +14,16 @@ module type S = sig
   
   val create : unit -> t Lwt.t
   
-  val add : t -> elt -> t list -> t Lwt.t
+  val build : elt option -> t list -> t Lwt.t
 
   val read_exn : t -> (elt option * t list) Lwt.t
 
+  val to_list : t -> elt list Lwt.t
+
+  val of_list: elt list -> t Lwt.t
+
+  val show: (elt -> string) -> t -> string Lwt.t
+  
 end
 
 module type Config = sig

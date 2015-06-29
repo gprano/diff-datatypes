@@ -7,15 +7,15 @@ module Config = struct
 end
 module Path = Irmin.Path.String_list
 module S = Irmin_heap.Make(Git)(Irmin.Hash.SHA1)(Tc.Int)(Path)(Config)
-module Stack = Irmin_datatypes.MSTACK_Make(S)
+module Stack = Irmin_datatypes.MQUEUE_Make(S)
 
 let get_val =
   let c = ref (-1) in
   (fun () -> incr c; !c)
 
 let main () =
-  Stack.empty >>= fun q0 ->
-  
+  Stack.create () >>= fun q0 ->
+
   (** the stuff to do on q0 *)
   Stack.push q0 (get_val ()) >>= fun q0 -> 
 
@@ -44,12 +44,16 @@ let main () =
   | `Ok None     -> failwith "none"
   | `Ok (Some res) -> (
       (** writing the result *)
-    Stack.show string_of_int res >>= fun res ->
-    Stack.show string_of_int q0 >>= fun q0 ->
-    Stack.show string_of_int q1 >>= fun q1 ->
-    Stack.show string_of_int q2  >>= fun q2 ->
-    List.iter print_endline [q0;q1;q2;res];
-    Lwt.return () )
-		      
+
+      Stack.pop res >>= fun (_,res2) ->
+
+      Stack.show string_of_int res >>= fun res ->
+      Stack.show string_of_int q0 >>= fun q0 ->
+      Stack.show string_of_int q1 >>= fun q1 ->
+      Stack.show string_of_int q2  >>= fun q2 ->
+      Stack.show string_of_int res2  >>= fun res2 ->
+      List.iter print_endline [q0;q1;q2;res;res2];
+      Lwt.return () )
+
 let () =
   Lwt_unix.run (main ())

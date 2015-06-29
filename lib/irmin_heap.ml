@@ -11,8 +11,11 @@ module type S = sig
   include Irmin.Contents.S
   type elt
   val create : unit -> t Lwt.t
-  val add : t -> elt -> t list -> t Lwt.t
+  val build : elt option -> t list -> t Lwt.t
   val read_exn : t -> (elt option * t list) Lwt.t
+  val to_list : t -> elt list Lwt.t
+  val of_list: elt list -> t Lwt.t
+  val show: (elt -> string) -> t -> string Lwt.t
 end
 
 module type Config = sig
@@ -105,22 +108,23 @@ module Make
     children = [];
   }
 
+
   let create () =
     Store.create () >>= fun store ->
     Store.add (store "create") (C.Node empty) >>= fun root ->
     return root
 
-  let add s elt children =
+  let build elt children =
     Store.create () >>= fun store ->
-    Store.add (store "add elt") (C.Elt elt) >>= fun key_elt ->
-    let node = {
-      value = Some key_elt;
-      children = children;
-    } in
+    ( match elt with
+      | None -> return None
+      | Some elt -> Store.add (store "add elt") (C.Elt elt) >>= fun k ->
+        return (Some k) ) >>= fun value ->
+    let node = {value;children;} in
     Store.add (store "add node") (C.Node node) >>= fun key_node ->
     return key_node
 
-  let (read_exn : t -> ((elt option)*(t list)) Lwt.t) = fun s ->
+  let (read_exn : t -> (elt option * t list) Lwt.t) = fun s ->
     Store.create () >>= fun store ->
     Store.read (store "read") s >>= function
     | None -> raise (Error `Read_none)
@@ -132,7 +136,26 @@ module Make
             | None -> raise (Error `Read_none)
             | Some (C.Node _) -> failwith "read elt key and get a node"
             | Some (C.Elt elt) -> return (Some elt, x.children) ))
+
+  let shorthash k = String.sub (to_hum k) 0 5
   
+  let rec show to_string s =
+    read_exn s >>= fun (elt, l) ->
+    let str_elt = match elt with
+      | None -> "None"
+      | Some e -> to_string e in
+    let rec f = function
+      | [] -> return ""
+      | x::xs -> show to_string x >>= fun str ->
+        f xs >>= fun str2 -> return ("("^str^")"^str2) in
+    f l >>= fun str ->
+    return (str_elt^"<"^(shorthash s)^">"^":"^str)
+
+  let share_equal x y =
+    read_exn x >>= fun (ex,lx) ->
+    read_exn y >>= fun (ey,ly) ->
+    return (ex = ey && List.length lx = List.length ly)
+    
   type edit =
     | Ins of t
     | Cpy of t
@@ -140,6 +163,14 @@ module Make
 
   type edit_script = edit list
 
+  let string_of_edit = function
+      |Ins k -> "Ins "^(shorthash k)
+      |Cpy k -> "Cpy "^(shorthash k)
+      |Del k -> "Del "^(shorthash k)
+
+  let string_of_es es = String.concat "," (List.map string_of_edit es)
+  let print_es es = Printf.printf "%d: %s\n" (List.length es) (string_of_es es)
+  
   module ObjSet = Set.Make (K)
 
   type dfs_ctxt =
@@ -187,7 +218,8 @@ module Make
           let l1 = Cpy x :: es in
           best2 () >>= fun l2 ->
           if List.length l1 < List.length l2 then return l1 else return l2 in
-        if equal x y then best3 () else best2 () in
+         share_equal x y >>= fun b -> 
+        if b then best3 () else best2 () in
 
     let c1 = {visited = ObjSet.empty; todo = [s1]} in
     let c2 = {visited = ObjSet.empty; todo = [s2]} in
@@ -204,7 +236,7 @@ module Make
             | [] -> return (c,e,acc)
             | x :: xs ->
               patch_core store c e >>= fun (c,e,k) ->
-              f c e (k::acc) xs in
+              f c e (acc@[k]) xs in
           f c es [] node.children >>= fun (c,e,acc) ->
           let newnode = { value = node.value ;
                           children = acc; } in
@@ -212,14 +244,21 @@ module Make
           return (c,e,k)
         end in
     function
-    | [] -> failwith "empty edit script in patch_core, which K.t to return ?"
+    | [] ->
+      Printf.printf "todo size : %d\n" (List.length c.todo);
+      create () >>= fun k ->
+      return (c,[],k)
+      (* failwith "empty edit script in patch_core, which K.t to return ?"*)
     | Ins x::es -> add_node_of_key x es c
     | Del _::es -> dfs_1step store c >>= fun c -> patch_core store c es
     | Cpy _::es -> ( match c.todo with
       | [] -> failwith "patch_core : edit script not compatible"
       | x::_ -> dfs_1step store c >>= fun c -> add_node_of_key x es c )
   
-  let (patch : t -> edit_script -> t Lwt.t) = fun k es ->
+  let patch : t -> edit_script -> t Lwt.t = fun k es ->
+    Printf.printf "es %d %s\n" (List.length es) (string_of_es es);
+    (show (fun elt -> "") k) >>= fun str ->
+    Printf.printf "onto: %s\n" str;
     Store.create () >>= fun store ->
     patch_core store {visited = ObjSet.empty; todo = [k]} es >>= fun (c,e,k) ->
     assert (c.todo = [] && e = []);
@@ -228,7 +267,7 @@ module Make
 
   (* TODO fix equality used for sharing*)
   let rec merge_script : edit_script -> edit_script -> edit_script =
-      fun a b -> match a,b with
+    fun a b -> match a,b with
     | [],[] -> []
     | Ins ex :: xs, Ins ey :: ys ->
       if ex = ey then Ins ex :: merge_script xs ys
@@ -236,6 +275,7 @@ module Make
     | Ins e :: xs, ys
     | xs, Ins e :: ys -> Ins e :: merge_script xs ys
     | Del ex :: xs, Del ey :: ys ->
+      (* here it makes sense to use hash equality because it's supposed to be from the same structure (?)*)
       if ex = ey then Del ex :: merge_script xs ys
       else failwith "merging Del x, Del y with x<>y, should not happen ?"
     | Del e :: xs, Cpy e_ :: ys
@@ -255,9 +295,35 @@ module Make
         diff old s1 >>= fun e1 ->
         diff old s2 >>= fun e2 ->
         let e = merge_script e1 e2 in
+        print_es e1;print_es e2;print_es e;
+        (show (fun e -> "") s1) >>= fun str1 ->
+        (show (fun e -> "") s2) >>= fun str2 ->
+        (show (fun e -> "") old) >>= fun strold ->
+        Printf.printf "old %s\n s1 %s\n s2 %s\n" strold str1 str2;
         patch old e >>= fun s_merge ->
+        (show (fun e -> "") s_merge) >>= fun strmerge ->
+        Printf.printf "merged: %s\n" strmerge;
+        patch old e1 >>= fun s11 ->
+        (show (fun e -> "") s11) >>= fun str11 ->
+        Printf.printf "s1(?): %s\n" str11;
+
+
         ok s_merge in
 
     fun _path -> Irmin.Merge.option (module K) merge
+
+  let rec to_list s =
+    read_exn s >>= function
+    | Some e, [x] -> to_list x >>= fun x -> return (e::x)
+    | None, [] -> return []
+    | None, l -> Printf.printf "none and %d ch\n" (List.length l);
+      failwith "yaya"
+    | Some e, l -> Printf.printf "some and %d ch\n" (List.length l);
+      failwith "yay"
+  (*| _ -> failwith "incorrect list shape"*)
+
+  let rec of_list = function
+    | [] -> build None []
+    | e::x -> of_list x >>= fun s -> build (Some e) [s]
   
 end
