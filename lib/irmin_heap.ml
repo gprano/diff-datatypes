@@ -203,7 +203,7 @@ module Make
       | x::_, [] ->
         dfs_1step store c1 >>= fun c1 ->
         diff_ctxt c1 c2 >>= fun es ->
-        return (Ins x :: es)
+        return (Del x :: es)
       | x::_, y::_ ->
         dfs_1step store c1 >>= fun c1_ ->
         dfs_1step store c2 >>= fun c2_ ->
@@ -261,7 +261,10 @@ module Make
     Printf.printf "onto: %s\n" str;
     Store.create () >>= fun store ->
     patch_core store {visited = ObjSet.empty; todo = [k]} es >>= fun (c,e,k) ->
-    assert (c.todo = [] && e = []);
+    (*    assert (c.todo = [] && e = []); *)
+    (* this can be triggered if there is a Del left, because we inserted a leaf instead and there is no slot anymore so the Del is not consumed. still gives correct result *)
+    Printf.printf "%d %d\n" (List.length c.todo) (List.length e);
+    print_es e;
     return k
 
 
@@ -274,32 +277,29 @@ module Make
       else Ins ex :: merge_script xs b
     | Ins e :: xs, ys
     | xs, Ins e :: ys -> Ins e :: merge_script xs ys
-    | Del ex :: xs, Del ey :: ys ->
-      (* here it makes sense to use hash equality because it's supposed to be from the same structure (?)*)
-      if ex = ey then Del ex :: merge_script xs ys
-      else failwith "merging Del x, Del y with x<>y, should not happen ?"
+    | Del ex :: xs, Del ey :: ys -> assert (ex=ey); Del ex :: merge_script xs ys
     | Del e :: xs, Cpy e_ :: ys
-    | Cpy e_ :: xs, Del e :: ys -> assert (e = e_); Del e :: merge_script xs ys
-    | Cpy ex :: xs, Cpy ey :: ys ->
-      if ex = ey then Cpy ex :: merge_script xs ys
-      else failwith "merging Cpy x, Cpy y with x<>y, should not happen ?"
+    | Cpy e_ :: xs, Del e :: ys -> assert(e = e_); Del e :: merge_script xs ys
+    | Cpy ex :: xs, Cpy ey :: ys -> assert (ex=ey); Cpy ex :: merge_script xs ys
     | ex::xs,[] | [],ex::xs ->
-      failwith "Del x,[] or Cpy x,[]: should not happen ?"
+      failwith "Del x,[] or Cpy x,[]: this should not happen"
 
   let merge : Path.t -> t option Irmin.Merge.t =
     
     let merge ~old s1 s2 =
+      Printf.printf "merge\n";
       old () >>= function
       | `Conflict _ | `Ok None -> conflict "merge"
       | `Ok (Some old) ->
         diff old s1 >>= fun e1 ->
         diff old s2 >>= fun e2 ->
-        let e = merge_script e1 e2 in
-        print_es e1;print_es e2;print_es e;
+        print_es e1;print_es e2;
         (show (fun e -> "") s1) >>= fun str1 ->
         (show (fun e -> "") s2) >>= fun str2 ->
         (show (fun e -> "") old) >>= fun strold ->
         Printf.printf "old %s\n s1 %s\n s2 %s\n" strold str1 str2;
+        let e = merge_script e1 e2 in
+        print_es e;
         patch old e >>= fun s_merge ->
         (show (fun e -> "") s_merge) >>= fun strmerge ->
         Printf.printf "merged: %s\n" strmerge;
