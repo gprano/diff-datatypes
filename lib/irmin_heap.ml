@@ -195,44 +195,44 @@ module Make
 
     Store.create() >>= fun store ->
 
-    let rec diff_ctxt c1 c2 =
-      if Hashtbl.mem h (c1,c2) then
-        return (Hashtbl.find h (c1,c2))
+    let rec diff_ctxt c1 c2 i1 i2 =
+      if Hashtbl.mem h (i1,i2) then
+        return (Hashtbl.find h (i1,i2))
       else
         begin
           match (c1.todo, c2.todo) with
           | [], [] -> return []
           | [], y::_ ->
             dfs_1step store c2 >>= fun c2 ->
-            diff_ctxt c1 c2 >>= fun es ->
+            diff_ctxt c1 c2 i1 (i2+1) >>= fun es ->
             return (Ins y :: es)
           | x::_, [] ->
             dfs_1step store c1 >>= fun c1 ->
-            diff_ctxt c1 c2 >>= fun es ->
+            diff_ctxt c1 c2 (i1+1) i2 >>= fun es ->
             return (Del x :: es)
           | x::_, y::_ ->
             dfs_1step store c1 >>= fun c1_ ->
             dfs_1step store c2 >>= fun c2_ ->
             let best2 () =
-              diff_ctxt c1_ c2 >>= fun es1 ->
-              diff_ctxt c1 c2_ >>= fun es2 ->
+              diff_ctxt c1_ c2 (i1+1) i2 >>= fun es1 ->
+              diff_ctxt c1 c2_ i1 (i2+1) >>= fun es2 ->
               let l1 = Del x :: es1 in
               let l2 = Ins y :: es2 in
               if List.length l1 < List.length l2 then return l1 else return l2 in
             let best3 () =
-              diff_ctxt c1_ c2_ >>= fun es ->
+              diff_ctxt c1_ c2_ (i1+1) (i2+1) >>= fun es ->
               let l1 = Cpy x :: es in
               best2 () >>= fun l2 ->
               if List.length l1 < List.length l2 then return l1 else return l2 in
             share_equal x y >>= fun b -> 
             if b then best3 () else best2 ()
         end >>= fun res ->
-        Hashtbl.add h (c1,c2) res;
+        Hashtbl.add h (i1,i2) res;
         return res in
 
     let c1 = {visited = ObjSet.empty; todo = [s1]} in
     let c2 = {visited = ObjSet.empty; todo = [s2]} in
-    diff_ctxt c1 c2
+    diff_ctxt c1 c2 0 0
 
   let rec patch_core store (c : dfs_ctxt) =
     let add_node_of_key x es c =
@@ -294,27 +294,24 @@ module Make
   let merge : Path.t -> t option Irmin.Merge.t =
 
     let merge ~old s1 s2 =
-      Printf.printf "merge\n";
       old () >>= function
       | `Conflict _ | `Ok None -> conflict "merge"
       | `Ok (Some old) ->
         diff old s1 >>= fun e1 ->
         diff old s2 >>= fun e2 ->
-        print_es e1;print_es e2;
+        (*print_es e1;print_es e2;
         (show (fun e -> "") s1) >>= fun str1 ->
         (show (fun e -> "") s2) >>= fun str2 ->
         (show (fun e -> "") old) >>= fun strold ->
-        Printf.printf "old %s\n s1 %s\n s2 %s\n" strold str1 str2;
+          Printf.printf "old %s\n s1 %s\n s2 %s\n" strold str1 str2;*)
         let e = merge_script e1 e2 in
-        print_es e;
+        (*print_es e;*)
         patch old e >>= fun s_merge ->
-        (show (fun e -> "") s_merge) >>= fun strmerge ->
+        (*(show (fun e -> "") s_merge) >>= fun strmerge ->
         Printf.printf "merged: %s\n" strmerge;
         patch old e1 >>= fun s11 ->
         (show (fun e -> "") s11) >>= fun str11 ->
-        Printf.printf "s1(?): %s\n" str11;
-
-
+          Printf.printf "s1(?): %s\n" str11;*)
         ok s_merge in
 
     fun _path -> Irmin.Merge.option (module K) merge
