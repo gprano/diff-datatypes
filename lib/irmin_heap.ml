@@ -4,7 +4,7 @@ open Irmin.Merge.OP
 exception Empty
 
 type error = [ `Todo | `Read_none ]
-             
+
 exception Error of error
 
 module type S = sig
@@ -51,7 +51,7 @@ module Make
           let of_t {value; children} =
             (value, children)
         end)
-    
+
     type t =
       | Node of Node.t
       | Elt of V.t
@@ -88,12 +88,12 @@ module Make
       |> of_string
     let size_of t =
       let str = to_string t in
-       String.length str
-    
+      String.length str
+
   end
 
   module Store = struct
-    
+
     module S = AO(K)(C)
 
     include S
@@ -102,7 +102,7 @@ module Make
       create Config.conf Config.task
 
   end
-  
+
   let empty = {
     value = None;
     children = [];
@@ -130,15 +130,15 @@ module Make
     | None -> raise (Error `Read_none)
     | Some (C.Elt _) -> failwith "try to read Elt from API"
     | Some (C.Node x) -> ( match x.value with
-      | None -> return (None, x.children)
-      | Some k ->
-        ( Store.read (store "read elt") k >>= function
-            | None -> raise (Error `Read_none)
-            | Some (C.Node _) -> failwith "read elt key and get a node"
-            | Some (C.Elt elt) -> return (Some elt, x.children) ))
+        | None -> return (None, x.children)
+        | Some k ->
+          ( Store.read (store "read elt") k >>= function
+              | None -> raise (Error `Read_none)
+              | Some (C.Node _) -> failwith "read elt key and get a node"
+              | Some (C.Elt elt) -> return (Some elt, x.children) ))
 
   let shorthash k = String.sub (to_hum k) 0 5
-  
+
   let rec show to_string s =
     read_exn s >>= fun (elt, l) ->
     let str_elt = match elt with
@@ -155,7 +155,7 @@ module Make
     read_exn x >>= fun (ex,lx) ->
     read_exn y >>= fun (ey,ly) ->
     return (ex = ey && List.length lx = List.length ly)
-    
+
   type edit =
     | Ins of t
     | Cpy of t
@@ -164,13 +164,13 @@ module Make
   type edit_script = edit list
 
   let string_of_edit = function
-      |Ins k -> "Ins "^(shorthash k)
-      |Cpy k -> "Cpy "^(shorthash k)
-      |Del k -> "Del "^(shorthash k)
+    |Ins k -> "Ins "^(shorthash k)
+    |Cpy k -> "Cpy "^(shorthash k)
+    |Del k -> "Del "^(shorthash k)
 
   let string_of_es es = String.concat "," (List.map string_of_edit es)
   let print_es es = Printf.printf "%d: %s\n" (List.length es) (string_of_es es)
-  
+
   module ObjSet = Set.Make (K)
 
   type dfs_ctxt =
@@ -191,35 +191,44 @@ module Make
         end
 
   let diff (s1 : t) (s2 : t) : edit_script Lwt.t =
+    let h = Hashtbl.create 10 in
+
     Store.create() >>= fun store ->
-    
+
     let rec diff_ctxt c1 c2 =
-      match (c1.todo, c2.todo) with
-      | [], [] -> return []
-      | [], y::_ ->
-        dfs_1step store c2 >>= fun c2 ->
-        diff_ctxt c1 c2 >>= fun es ->
-        return (Ins y :: es)
-      | x::_, [] ->
-        dfs_1step store c1 >>= fun c1 ->
-        diff_ctxt c1 c2 >>= fun es ->
-        return (Del x :: es)
-      | x::_, y::_ ->
-        dfs_1step store c1 >>= fun c1_ ->
-        dfs_1step store c2 >>= fun c2_ ->
-        let best2 () =
-          diff_ctxt c1_ c2 >>= fun es1 ->
-          diff_ctxt c1 c2_ >>= fun es2 ->
-          let l1 = Del x :: es1 in
-          let l2 = Ins y :: es2 in
-          if List.length l1 < List.length l2 then return l1 else return l2 in
-        let best3 () =
-          diff_ctxt c1_ c2_ >>= fun es ->
-          let l1 = Cpy x :: es in
-          best2 () >>= fun l2 ->
-          if List.length l1 < List.length l2 then return l1 else return l2 in
-         share_equal x y >>= fun b -> 
-        if b then best3 () else best2 () in
+      if Hashtbl.mem h (c1,c2) then
+        return (Hashtbl.find h (c1,c2))
+      else
+        begin
+          match (c1.todo, c2.todo) with
+          | [], [] -> return []
+          | [], y::_ ->
+            dfs_1step store c2 >>= fun c2 ->
+            diff_ctxt c1 c2 >>= fun es ->
+            return (Ins y :: es)
+          | x::_, [] ->
+            dfs_1step store c1 >>= fun c1 ->
+            diff_ctxt c1 c2 >>= fun es ->
+            return (Del x :: es)
+          | x::_, y::_ ->
+            dfs_1step store c1 >>= fun c1_ ->
+            dfs_1step store c2 >>= fun c2_ ->
+            let best2 () =
+              diff_ctxt c1_ c2 >>= fun es1 ->
+              diff_ctxt c1 c2_ >>= fun es2 ->
+              let l1 = Del x :: es1 in
+              let l2 = Ins y :: es2 in
+              if List.length l1 < List.length l2 then return l1 else return l2 in
+            let best3 () =
+              diff_ctxt c1_ c2_ >>= fun es ->
+              let l1 = Cpy x :: es in
+              best2 () >>= fun l2 ->
+              if List.length l1 < List.length l2 then return l1 else return l2 in
+            share_equal x y >>= fun b -> 
+            if b then best3 () else best2 ()
+        end >>= fun res ->
+        Hashtbl.add h (c1,c2) res;
+        return res in
 
     let c1 = {visited = ObjSet.empty; todo = [s1]} in
     let c2 = {visited = ObjSet.empty; todo = [s2]} in
@@ -248,13 +257,13 @@ module Make
       Printf.printf "todo size : %d\n" (List.length c.todo);
       create () >>= fun k ->
       return (c,[],k)
-      (* failwith "empty edit script in patch_core, which K.t to return ?"*)
+    (* failwith "empty edit script in patch_core, which K.t to return ?"*)
     | Ins x::es -> add_node_of_key x es c
     | Del _::es -> dfs_1step store c >>= fun c -> patch_core store c es
     | Cpy _::es -> ( match c.todo with
-      | [] -> failwith "patch_core : edit script not compatible"
-      | x::_ -> dfs_1step store c >>= fun c -> add_node_of_key x es c )
-  
+        | [] -> failwith "patch_core : edit script not compatible"
+        | x::_ -> dfs_1step store c >>= fun c -> add_node_of_key x es c )
+
   let patch : t -> edit_script -> t Lwt.t = fun k es ->
     Printf.printf "es %d %s\n" (List.length es) (string_of_es es);
     (show (fun elt -> "") k) >>= fun str ->
@@ -262,30 +271,28 @@ module Make
     Store.create () >>= fun store ->
     patch_core store {visited = ObjSet.empty; todo = [k]} es >>= fun (c,e,k) ->
     (*    assert (c.todo = [] && e = []); *)
-    (* this can be triggered if there is a Del left, because we inserted a leaf instead and there is no slot anymore so the Del is not consumed. still gives correct result *)
-    Printf.printf "%d %d\n" (List.length c.todo) (List.length e);
-    print_es e;
+    (* this can be triggered if there is some Del left, because we inserted a leaf instead and there is no slot anymore so the Del is not consumed. still gives correct result *)
     return k
 
 
   (* TODO fix equality used for sharing*)
   let rec merge_script : edit_script -> edit_script -> edit_script =
     fun a b -> match a,b with
-    | [],[] -> []
-    | Ins ex :: xs, Ins ey :: ys ->
-      if ex = ey then Ins ex :: merge_script xs ys
-      else Ins ex :: merge_script xs b
-    | Ins e :: xs, ys
-    | xs, Ins e :: ys -> Ins e :: merge_script xs ys
-    | Del ex :: xs, Del ey :: ys -> assert (ex=ey); Del ex :: merge_script xs ys
-    | Del e :: xs, Cpy e_ :: ys
-    | Cpy e_ :: xs, Del e :: ys -> assert(e = e_); Del e :: merge_script xs ys
-    | Cpy ex :: xs, Cpy ey :: ys -> assert (ex=ey); Cpy ex :: merge_script xs ys
-    | ex::xs,[] | [],ex::xs ->
-      failwith "Del x,[] or Cpy x,[]: this should not happen"
+      | [],[] -> []
+      | Ins ex :: xs, Ins ey :: ys ->
+        if ex = ey then Ins ex :: merge_script xs ys
+        else Ins ex :: merge_script xs b
+      | Ins e :: xs, ys
+      | xs, Ins e :: ys -> Ins e :: merge_script xs ys
+      | Del ex :: xs, Del ey :: ys -> assert (ex=ey); Del ex :: merge_script xs ys
+      | Del e :: xs, Cpy e_ :: ys
+      | Cpy e_ :: xs, Del e :: ys -> assert(e = e_); Del e :: merge_script xs ys
+      | Cpy ex :: xs, Cpy ey :: ys -> assert (ex=ey); Cpy ex :: merge_script xs ys
+      | ex::xs,[] | [],ex::xs ->
+        failwith "Del x,[] or Cpy x,[]: this should not happen"
 
   let merge : Path.t -> t option Irmin.Merge.t =
-    
+
     let merge ~old s1 s2 =
       Printf.printf "merge\n";
       old () >>= function
@@ -325,5 +332,5 @@ module Make
   let rec of_list = function
     | [] -> build None []
     | e::x -> of_list x >>= fun s -> build (Some e) [s]
-  
+
 end
