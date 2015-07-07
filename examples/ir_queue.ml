@@ -24,9 +24,10 @@ let main () =
   Lwt.return q0                      >>= fun q2 ->
 
   (** the stuff to do on q1 *)
+
+  Stack.push q1 (get_val ())         >>= fun q1 ->
+  Stack.push q1 (get_val ())         >>= fun q1 ->
   Stack.pop q1                       >>= fun (_,q1) ->
-  Stack.push q1 (get_val ())         >>= fun q1 ->
-  Stack.push q1 (get_val ())         >>= fun q1 ->
   (* Stack.pop q1                    >>= fun (_,q1) -> *)
   (* Stack.pop q1                    >>= fun (_,q1) -> *)
 
@@ -45,14 +46,12 @@ let main () =
   | `Ok (Some res) -> (
       (** writing the result *)
 
-      Stack.pop res >>= fun (_,res2) ->
 
       Stack.show string_of_int res >>= fun res ->
       Stack.show string_of_int q0 >>= fun q0 ->
       Stack.show string_of_int q1 >>= fun q1 ->
       Stack.show string_of_int q2  >>= fun q2 ->
-      Stack.show string_of_int res2  >>= fun res2 ->
-      List.iter print_endline [q0;q1;q2;res;res2];
+      List.iter print_endline [q0;q1;q2;res];
       Lwt.return () )
 
 let () =

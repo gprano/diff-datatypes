@@ -81,6 +81,16 @@ Executable "ir_queue"
   ByteOpt:          -thread
   NativeOpt:        -thread
 
+Executable "ir_queue2"
+  Path:             examples/
+  MainIs:           ir_queue2.ml
+  Build$:           flag(examples)
+  CompiledObject:   best
+  Install:          false
+  BuildDepends:     diff_datatypes, irmin.unix
+  ByteOpt:          -thread
+  NativeOpt:        -thread
+
 Executable "ir_tree"
   Path:             examples/
   MainIs:           ir_tree.ml

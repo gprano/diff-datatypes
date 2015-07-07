@@ -29,19 +29,19 @@ let main () =
   Stack.create () >>= fun q0 ->
 
   (** the stuff to do on q0 *)
-  push_n q0 300 >>= fun q0 ->
+  push_n q0 5 >>= fun q0 ->
 
   (** branching to q1,q2 *)
   Lwt.return q0                      >>= fun q1 ->
   Lwt.return q0                      >>= fun q2 ->
 
   (** the stuff to do on q1 *)
-  pop_n q1 23 >>= fun q1 ->
-  push_n q1 100 >>= fun q1 ->
+  pop_n q1 1 >>= fun q1 ->
+  push_n q1 1 >>= fun q1 ->
 
   (** the stuff to do on q2 *)
-  pop_n q2 50 >>= fun q2 ->
-  push_n q2 100 >>= fun q2 ->
+  pop_n q2 4 >>= fun q2 ->
+  push_n q2 3 >>= fun q2 ->
 
   (** the merging part *)
   let old = Irmin.Merge.promise (Some q0) in

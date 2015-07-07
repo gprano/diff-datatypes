@@ -23,7 +23,9 @@ module type S = sig
   val of_list: elt list -> t Lwt.t
 
   val show: (elt -> string) -> t -> string Lwt.t
-  
+
+  val merge3: old:(unit -> [< `Conflict of 'a | `Ok of t option ] Lwt.t) -> t -> t -> t Irmin.Merge.result Lwt.t
+
 end
 
 module type Config = sig

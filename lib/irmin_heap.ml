@@ -16,6 +16,7 @@ module type S = sig
   val to_list : t -> elt list Lwt.t
   val of_list: elt list -> t Lwt.t
   val show: (elt -> string) -> t -> string Lwt.t
+  val merge3: old:(unit -> [< `Conflict of 'a | `Ok of t option ] Lwt.t) -> t -> t -> t Irmin.Merge.result Lwt.t
 end
 
 module type Config = sig
@@ -32,13 +33,14 @@ module Make
 = struct
 
   type elt = V.t
+  module K = K
   include K
 
   type node = { value : t option; children : t list}
 
   module Path = P
 
-  module C = struct (* what will be inside the AO store *)
+  module C = struct
 
     module KO = Tc.Option (K)
     module KL = Tc.List (K)
@@ -108,7 +110,6 @@ module Make
     children = [];
   }
 
-
   let create () =
     Store.create () >>= fun store ->
     Store.add (store "create") (C.Node empty) >>= fun root ->
@@ -124,7 +125,7 @@ module Make
     Store.add (store "add node") (C.Node node) >>= fun key_node ->
     return key_node
 
-  let (read_exn : t -> (elt option * t list) Lwt.t) = fun s ->
+  let read_exn : t -> (elt option * t list) Lwt.t = fun s ->
     Store.create () >>= fun store ->
     Store.read (store "read") s >>= function
     | None -> raise (Error `Read_none)
@@ -171,36 +172,30 @@ module Make
   let string_of_es es = String.concat "," (List.map string_of_edit es)
   let print_es es = Printf.printf "%d: %s\n" (List.length es) (string_of_es es)
 
-  module ObjSet = Set.Make (K)
+  type dfs_ctxt = t list
 
-  type dfs_ctxt =
-    {visited : ObjSet.t; todo : t list}
-
-  let rec dfs_1step store {visited; todo} =
+  let rec dfs_1step store todo =
     match todo with
-    | [] -> return {visited; todo}
+    | [] -> return todo
     | obj::xs ->
-      if ObjSet.mem obj visited then dfs_1step store {visited; todo = xs}
-      else
-        begin
-          Store.read (store "read dfs_1step") obj >>= function
-          | None -> failwith "K.t pointer to nothing"
-          | Some (C.Node node) ->
-            return {visited = ObjSet.add obj visited; todo = node.children@xs}
-          | Some (C.Elt _) -> return {visited; todo}
-        end
+      begin
+        Store.read (store "read dfs_1step") obj >>= function
+        | None -> failwith "K.t pointer to nothing"
+        | Some (C.Node node) ->
+          return (node.children@xs)
+        | Some (C.Elt _) -> return todo
+      end
 
   let diff (s1 : t) (s2 : t) : edit_script Lwt.t =
     let h = Hashtbl.create 10 in
-
     Store.create() >>= fun store ->
 
     let rec diff_ctxt c1 c2 i1 i2 =
-      if Hashtbl.mem h (i1,i2) then
-        return (Hashtbl.find h (i1,i2))
+      if Hashtbl.mem h (c1,c2) then
+        return (Hashtbl.find h (c1,c2))
       else
         begin
-          match (c1.todo, c2.todo) with
+          match (c1, c2) with
           | [], [] -> return []
           | [], y::_ ->
             dfs_1step store c2 >>= fun c2 ->
@@ -227,107 +222,109 @@ module Make
             share_equal x y >>= fun b -> 
             if b then best3 () else best2 ()
         end >>= fun res ->
-        Hashtbl.add h (i1,i2) res;
+        Hashtbl.add h (c1,c2) res;
         return res in
-
-    let c1 = {visited = ObjSet.empty; todo = [s1]} in
-    let c2 = {visited = ObjSet.empty; todo = [s2]} in
+    let c1 = [s1] in
+    let c2 = [s2] in
     diff_ctxt c1 c2 0 0
+  
+let rec patch_core store (c : dfs_ctxt) =
+  let add_node_of_key x es c =
+    Store.read (store "patch_core read") x >>= function
+    | None -> failwith "read None"
+    | Some (C.Elt _ ) -> failwith "Ins C.Elt"
+    | Some (C.Node node) ->
+      begin
+        let rec f c e acc = function
+          | [] -> return (c,e,acc)
+          | x :: xs ->
+            patch_core store c e >>= fun (c,e,k) ->
+            f c e (acc@[k]) xs in
+        f c es [] node.children >>= fun (c,e,acc) ->
+        let newnode = { value = node.value ;
+                        children = acc; } in
+        Store.add (store "patch_core add") (C.Node newnode) >>= fun k ->
+        return (c,e,k)
+      end in
+  function
+  | [] -> failwith "call to patch_core with an empty edit_script"
+  | x::y ->
+    begin
+      (* Printf.printf "e %s c %s\n" (string_of_edit x)
+         (match c with [] -> "[]" | e::x -> shorthash e); *)
+      match x::y with
+      | Ins x::es -> add_node_of_key x es c
+      | Del _::es -> dfs_1step store c >>= fun c -> patch_core store c es
+      | Cpy _::es -> ( match c with
+          | [] -> failwith "patch_core : edit script not compatible"
+          | x::_ -> dfs_1step store c >>= fun c -> add_node_of_key x es c )
+      | _-> failwith "no"
+    end
+      
+let patch : t -> edit_script -> t Lwt.t = fun k es ->
+  Store.create () >>= fun store ->
+  patch_core store [k] es >>= fun (c,e,k) ->
+  if not (List.for_all (function Del _ -> true | _ -> false) e)
+  then ( print_es e; Printf.printf "%d\n" (List.length c));
+  return k
 
-  let rec patch_core store (c : dfs_ctxt) =
-    let add_node_of_key x es c =
-      Store.read (store "patch_core read") x >>= function
-      | None -> failwith "read None"
-      | Some (C.Elt _ ) -> failwith "Ins C.Elt"
-      | Some (C.Node node) ->
-        begin
-          let rec f c e acc = function
-            | [] -> return (c,e,acc)
-            | x :: xs ->
-              patch_core store c e >>= fun (c,e,k) ->
-              f c e (acc@[k]) xs in
-          f c es [] node.children >>= fun (c,e,acc) ->
-          let newnode = { value = node.value ;
-                          children = acc; } in
-          Store.add (store "patch_core add") (C.Node newnode) >>= fun k ->
-          return (c,e,k)
-        end in
-    function
-    | [] ->
-      Printf.printf "todo size : %d\n" (List.length c.todo);
-      create () >>= fun k ->
-      return (c,[],k)
-    (* failwith "empty edit script in patch_core, which K.t to return ?"*)
-    | Ins x::es -> add_node_of_key x es c
-    | Del _::es -> dfs_1step store c >>= fun c -> patch_core store c es
-    | Cpy _::es -> ( match c.todo with
-        | [] -> failwith "patch_core : edit script not compatible"
-        | x::_ -> dfs_1step store c >>= fun c -> add_node_of_key x es c )
+(* TODO fix equality used for sharing*)
+let rec merge_script : edit_script -> edit_script -> edit_script Lwt.t =
+  fun a b -> match a,b with
+    | [],[] -> return []
+    | Ins ex :: xs, Ins ey :: ys ->
+      share_equal ex ey >>= fun eq ->
+      if eq then
+        merge_script xs ys >>= fun es ->
+        Ins ex :: es |> return
+      else
+        merge_script xs b >>= fun es ->
+        Ins ex :: es |> return
+    | Ins e :: xs, ys
+    | xs, Ins e :: ys ->
+      merge_script xs ys >>= fun es -> Ins e :: es |> return
+    | Del ex :: xs, Del ey :: ys -> assert (ex=ey);
+      merge_script xs ys >>= fun es -> 
+      Del ex :: es |> return
+    | Del e :: xs, Cpy e_ :: ys
+    | Cpy e_ :: xs, Del e :: ys -> assert(e = e_);
+      merge_script xs ys >>= fun es ->
+      Del e :: es |> return
+    | Cpy ex :: xs, Cpy ey :: ys -> assert (ex=ey);
+      merge_script xs ys >>= fun es ->
+      Cpy ex :: es |> return
+    | ex::xs,[] | [],ex::xs ->
+      failwith "Del x,[] or Cpy x,[]: this should not happen"
 
-  let patch : t -> edit_script -> t Lwt.t = fun k es ->
-    Printf.printf "es %d %s\n" (List.length es) (string_of_es es);
-    (show (fun elt -> "") k) >>= fun str ->
-    Printf.printf "onto: %s\n" str;
-    Store.create () >>= fun store ->
-    patch_core store {visited = ObjSet.empty; todo = [k]} es >>= fun (c,e,k) ->
-    (*    assert (c.todo = [] && e = []); *)
-    (* this can be triggered if there is some Del left, because we inserted a leaf instead and there is no slot anymore so the Del is not consumed. still gives correct result *)
-    return k
+let merge3 ~old s1 s2 =
+    old () >>= function
+    | `Conflict _ | `Ok None -> conflict "merge"
+    | `Ok (Some old) ->
+      diff old s1 >>= fun e1 ->
+      diff old s2 >>= fun e2 ->
+      merge_script e1 e2 >>= fun e ->
+      patch old e >>= fun s_merge ->
 
+      (* let f = fun x -> string_of_int (Obj.magic x : int) in *)
+      (* let g = fun x -> return (print_endline x) in *)
+      (* List.map (fun x -> show f x >>= g) [old;s1;s2;s_merge] *)
+      (* |> Lwt.join >>= fun () -> *)
+      (* List.iter print_es [e1;e2;e]; *)
+      (* List.map (fun x -> patch old x >>= fun x -> show f x >>= g) [e1;e2] *)
+      (* |> Lwt.join >>= fun () -> *)
+      ok s_merge 
 
-  (* TODO fix equality used for sharing*)
-  let rec merge_script : edit_script -> edit_script -> edit_script =
-    fun a b -> match a,b with
-      | [],[] -> []
-      | Ins ex :: xs, Ins ey :: ys ->
-        if ex = ey then Ins ex :: merge_script xs ys
-        else Ins ex :: merge_script xs b
-      | Ins e :: xs, ys
-      | xs, Ins e :: ys -> Ins e :: merge_script xs ys
-      | Del ex :: xs, Del ey :: ys -> assert (ex=ey); Del ex :: merge_script xs ys
-      | Del e :: xs, Cpy e_ :: ys
-      | Cpy e_ :: xs, Del e :: ys -> assert(e = e_); Del e :: merge_script xs ys
-      | Cpy ex :: xs, Cpy ey :: ys -> assert (ex=ey); Cpy ex :: merge_script xs ys
-      | ex::xs,[] | [],ex::xs ->
-        failwith "Del x,[] or Cpy x,[]: this should not happen"
+let merge : Path.t -> t option Irmin.Merge.t =
+  fun _path -> Irmin.Merge.option (module K) merge3
 
-  let merge : Path.t -> t option Irmin.Merge.t =
+let rec to_list s =
+  read_exn s >>= function
+  | Some e, [x] -> to_list x >>= fun x -> return (e::x)
+  | None, [] -> return []
+  | _ -> failwith "incorrect list shape"
 
-    let merge ~old s1 s2 =
-      old () >>= function
-      | `Conflict _ | `Ok None -> conflict "merge"
-      | `Ok (Some old) ->
-        diff old s1 >>= fun e1 ->
-        diff old s2 >>= fun e2 ->
-        (*print_es e1;print_es e2;
-        (show (fun e -> "") s1) >>= fun str1 ->
-        (show (fun e -> "") s2) >>= fun str2 ->
-        (show (fun e -> "") old) >>= fun strold ->
-          Printf.printf "old %s\n s1 %s\n s2 %s\n" strold str1 str2;*)
-        let e = merge_script e1 e2 in
-        (*print_es e;*)
-        patch old e >>= fun s_merge ->
-        (*(show (fun e -> "") s_merge) >>= fun strmerge ->
-        Printf.printf "merged: %s\n" strmerge;
-        patch old e1 >>= fun s11 ->
-        (show (fun e -> "") s11) >>= fun str11 ->
-          Printf.printf "s1(?): %s\n" str11;*)
-        ok s_merge in
-
-    fun _path -> Irmin.Merge.option (module K) merge
-
-  let rec to_list s =
-    read_exn s >>= function
-    | Some e, [x] -> to_list x >>= fun x -> return (e::x)
-    | None, [] -> return []
-    | None, l -> Printf.printf "none and %d ch\n" (List.length l);
-      failwith "yaya"
-    | Some e, l -> Printf.printf "some and %d ch\n" (List.length l);
-      failwith "yay"
-  (*| _ -> failwith "incorrect list shape"*)
-
-  let rec of_list = function
-    | [] -> build None []
-    | e::x -> of_list x >>= fun s -> build (Some e) [s]
+let rec of_list = function
+  | [] -> build None []
+  | e::x -> of_list x >>= fun s -> build (Some e) [s]
 
 end

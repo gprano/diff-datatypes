@@ -19,7 +19,7 @@ module MSTACK_Make (S: Irmin_heap.S)
   module Path = S.Path
   let create = S.create
   let merge = S.merge
-
+                
   let push s elt = S.build (Some elt) [s]
 
   let pop s =
@@ -54,8 +54,18 @@ module MQUEUE_Make (S: Irmin_heap.S)
       S.create () >>= fun s -> 
       S.build None [pushed; to_pop]
     | _ -> failwith "incorrect queue shape"
+
+  let normalize s = (* complexity problem if we normalize when to_pop is not empty *)
+    S.read_exn s >>= function
+    | None, [pushed; to_pop] ->
+      S.to_list pushed >>= fun pushed_l ->
+      S.to_list to_pop >>= fun to_pop_l ->
+      S.of_list (to_pop_l @ List.rev pushed_l) >>= fun to_pop ->
+      S.create () >>= fun pushed ->
+      S.build None [pushed;to_pop]      
+    | _ -> failwith "incorrect shape"
   
-  let pop s =
+  let rec pop s =
     S.read_exn s >>= function
     | None, [pushed;to_pop] ->
       begin
@@ -65,14 +75,11 @@ module MQUEUE_Make (S: Irmin_heap.S)
           return (Some elt, s)
         | None, [] ->
           begin
-            S.to_list pushed >>= fun l ->
-            match (List.rev l) with
-            | [] -> return (None, s)
-            | x::xs ->
-              S.of_list xs >>= fun to_pop ->
-              S.create () >>= fun pushed ->
-              S.build None [pushed; to_pop] >>= fun s ->
-              return (Some x, s)
+            S.read_exn pushed >>= function
+            | None, [] -> return (None, s)
+            | Some _, [_] ->
+              normalize s >>= fun s -> pop s
+            | _ -> failwith "incorrect queue shape"
           end
         | _ -> failwith "incorrect queue shape"
       end
@@ -86,6 +93,17 @@ module MQUEUE_Make (S: Irmin_heap.S)
       return ((String.concat ":" (List.map to_string pushed))^"//"^
               (String.concat ":" (List.map to_string to_pop)))
     | _ -> failwith "incorrect queue shape in show"
+
+  let merge =
+    let merge3 ~old s1 s2 =
+      old () >>= function
+      | `Conflict _ | `Ok None -> Irmin.Merge.OP.conflict "merge"
+      | `Ok (Some old) ->
+        normalize old >>= fun old ->
+        normalize s1 >>= fun s1 ->
+        normalize s2 >>= fun s2 ->
+        S.merge3 ~old:(fun () -> return (`Ok (Some old))) s1 s2 in
+    fun _path -> Irmin.Merge.option (module S) merge3
   
 end
 
