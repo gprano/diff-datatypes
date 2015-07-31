@@ -1,24 +1,18 @@
 open Lwt
 
 module type MSTACK = sig
-  type t
+  include Irmin.Contents.S
   type elt
   val create : unit -> t Lwt.t
   val push : t -> elt -> t Lwt.t
   val pop : t -> (elt option * t) Lwt.t
   val show : (elt -> string) -> t -> string Lwt.t
-  module Path : Irmin.Path.S
-  val merge : Path.t -> t option Irmin.Merge.t
 end
 
 module MSTACK_Make (S: Irmin_heap.S)
 = struct
-  
-  type t =  S.t
-  type elt = S.elt
-  module Path = S.Path
-  let create = S.create
-  let merge = S.merge
+
+  include S
                 
   let push s elt = S.build (Some elt) [s]
 
@@ -37,10 +31,7 @@ end
 module MQUEUE_Make (S: Irmin_heap.S)
 = struct
 
-  type t = S.t
-  type elt = S.elt
-  module Path = S.Path
-  let merge = S.merge
+  include S
 
   let create () =
     S.create () >>= fun empty1 ->
@@ -55,7 +46,7 @@ module MQUEUE_Make (S: Irmin_heap.S)
       S.build None [pushed; to_pop]
     | _ -> failwith "incorrect queue shape"
 
-  let normalize s = (* complexity problem if we normalize when to_pop is not empty *)
+  let normalize s = 
     S.read_exn s >>= function
     | None, [pushed; to_pop] ->
       S.to_list pushed >>= fun pushed_l ->
@@ -108,24 +99,17 @@ module MQUEUE_Make (S: Irmin_heap.S)
 end
 
 module type MTREE = sig
-  type t
+  include Irmin.Contents.S
   type elt
   val build : elt option -> t list -> t Lwt.t
   val destr : t -> (elt option * t list) Lwt.t
   val show : (elt -> string) -> t -> string Lwt.t
-  module Path : Irmin.Path.S
-  val merge : Path.t -> t option Irmin.Merge.t
 end
 
 module MTREE_Make (S: Irmin_heap.S)
 = struct
 
-  type t = S.t
-  type elt = S.elt
-  module Path = S.Path
-  let merge = S.merge
-
-  let build = S.build 
+  include S
 
   let destr = S.read_exn
 

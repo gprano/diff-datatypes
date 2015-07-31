@@ -1,5 +1,5 @@
 let (>>=) = Lwt.bind
-
+              
 module Git = Irmin_git.AO(Git.Memory)
 module Config = struct
   let conf = Irmin_git.config ()

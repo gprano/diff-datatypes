@@ -3,6 +3,7 @@ S examples
 
 PKG lwt sexplib comparelib dolog ezjsonm bin_prot cstruct re uri git tc hex irmin irmin-unix
 PKG nocrypto cohttp.lwt-core cmdliner ocamlgraph oUnit alcotest
+PKG pa_lwt
 
 B _build/lib
 B _build/examples

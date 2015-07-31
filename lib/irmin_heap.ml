@@ -100,6 +100,10 @@ module Make
 
     include S
 
+    let add t v =
+      Printf.printf "add\n";
+      S.add t v
+    
     let create () =
       create Config.conf Config.task
 
@@ -213,7 +217,7 @@ module Make
               diff_ctxt c1 c2_ i1 (i2+1) >>= fun es2 ->
               let l1 = Del x :: es1 in
               let l2 = Ins y :: es2 in
-              if List.length l1 < List.length l2 then return l1 else return l2 in
+              if List.length l1 <= List.length l2 then return l1 else return l2 in
             let best3 () =
               diff_ctxt c1_ c2_ (i1+1) (i2+1) >>= fun es ->
               let l1 = Cpy x :: es in
@@ -305,13 +309,13 @@ let merge3 ~old s1 s2 =
       merge_script e1 e2 >>= fun e ->
       patch old e >>= fun s_merge ->
 
-      (* let f = fun x -> string_of_int (Obj.magic x : int) in *)
-      (* let g = fun x -> return (print_endline x) in *)
-      (* List.map (fun x -> show f x >>= g) [old;s1;s2;s_merge] *)
-      (* |> Lwt.join >>= fun () -> *)
-      (* List.iter print_es [e1;e2;e]; *)
-      (* List.map (fun x -> patch old x >>= fun x -> show f x >>= g) [e1;e2] *)
-      (* |> Lwt.join >>= fun () -> *)
+      let f = fun x -> string_of_int (Obj.magic x : int) in
+      let g = fun x -> return (print_endline x) in
+      List.map (fun x -> show f x >>= g) [old;s1;s2;s_merge]
+      |> Lwt.join >>= fun () ->
+      List.iter print_es [e1;e2;e];
+      List.map (fun x -> patch old x >>= fun x -> show f x >>= g) [e1;e2]
+      |> Lwt.join >>= fun () ->
       ok s_merge 
 
 let merge : Path.t -> t option Irmin.Merge.t =
